@@ -1,0 +1,607 @@
+<!DOCTYPE html>
+<html lang="ms">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sistem Kunci JKM (Online)</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <script src="https://cdn.sheetjs.com/xlsx-0.19.3/package/dist/xlsx.full.min.js"></script>
+    
+    <style>
+        body { background-color: #f0f2f5; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        .header-bg {
+            background: linear-gradient(135deg, #003366 0%, #004080 100%);
+            color: white; padding: 20px 0; margin-bottom: 25px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1); border-bottom: 4px solid #ffcc00;
+        }
+        .key-box {
+            height: 95px; border-radius: 10px; display: flex; flex-direction: column;
+            justify-content: center; align-items: center; cursor: pointer;
+            transition: all 0.2s ease; font-weight: bold; border: 1px solid rgba(0,0,0,0.1);
+            position: relative; overflow: hidden; background-color: white;
+            padding: 5px; /* Added padding */
+        }
+        .key-box:hover { transform: translateY(-5px); box-shadow: 0 10px 15px rgba(0,0,0,0.1); }
+        .key-available { border-left: 5px solid #198754; color: #198754; background: #e8f5e9; }
+        .key-borrowed { border-left: 5px solid #dc3545; color: #dc3545; background: #fce4ec; }
+        .loading-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(255,255,255,0.8); z-index: 9999; display: flex;
+            justify-content: center; align-items: center; flex-direction: column;
+        }
+        .key-title {
+            font-size: 1rem;
+            line-height: 1.2;
+            text-align: center;
+            width: 100%;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .key-subtitle {
+            font-size: 0.75rem;
+            color: #6c757d; /* Subtitle color */
+            margin-top: 2px;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="loadingOverlay" class="loading-overlay">
+        <div class="spinner-border text-primary" role="status" style="width: 3rem; height: 3rem;"></div>
+        <h5 class="mt-3 text-primary fw-bold">Menghubungi Google Sheets...</h5>
+        <small class="text-muted" id="loadingText">Sila tunggu sebentar</small>
+    </div>
+
+    <div class="header-bg">
+        <div class="container d-flex justify-content-between align-items-center">
+            <div>
+                <h2 class="fw-bold mb-0"><i class="fas fa-key me-2"></i>Sistem Kunci JKM</h2>
+                <small class="text-warning">Politeknik Kuching Sarawak (Online Database)</small>
+            </div>
+            <button class="btn btn-outline-light btn-sm" onclick="openChangePasswordModal()">
+                <i class="fas fa-user-lock me-1"></i> Tukar Kata Laluan
+            </button>
+        </div>
+    </div>
+
+    <div class="container mb-5">
+        <div class="row g-3 mb-4">
+            <div class="col-md-3">
+                <div class="card bg-success text-white shadow-sm h-100">
+                    <div class="card-body p-3 text-center">
+                        <h6 class="mb-0">Tersedia</h6>
+                        <h2 class="mb-0" id="count-available">0</h2>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card bg-danger text-white shadow-sm h-100">
+                    <div class="card-body p-3 text-center">
+                        <h6 class="mb-0">Dipinjam</h6>
+                        <h2 class="mb-0" id="count-borrowed">0</h2>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card shadow-sm h-100">
+                    <div class="card-body d-flex align-items-center">
+                        <input type="text" id="searchInput" class="form-control rounded-pill" placeholder="🔍 Cari No. Kunci atau Nama..." onkeyup="filterKeys()">
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="d-flex justify-content-end mb-2">
+            <button class="btn btn-primary btn-sm" onclick="fetchData()">
+                <i class="fas fa-sync-alt me-1"></i> Kemaskini Data
+            </button>
+        </div>
+
+        <div class="row g-3" id="key-grid"></div>
+        
+        <div id="no-result-msg" class="text-center py-5 d-none">
+            <i class="fas fa-exclamation-circle fa-3x text-danger mb-3"></i>
+            <h5 class="text-danger">Gagal Memuatkan Data</h5>
+            <p class="text-muted" id="error-details">Sila semak konsol untuk maklumat lanjut.</p>
+        </div>
+
+        <div class="card shadow-sm mt-4">
+            <div class="card-header bg-white">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <h5 class="m-0"><i class="fas fa-history me-2"></i>Log Transaksi</h5>
+                    <button class="btn btn-success btn-sm" onclick="exportToExcel()"><i class="fas fa-file-excel"></i> Eksport</button>
+                </div>
+                <input type="text" id="logSearchInput" class="form-control" placeholder="🔍 Cari Rekod Mengikut No. Kunci (cth: 101, 203)" onkeyup="filterLogs()">
+            </div>
+            <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
+                <table class="table table-striped table-hover mb-0 small">
+                    <thead class="table-dark sticky-top">
+                        <!-- KOLUM LOG ASAL -->
+                        <tr><th>Masa</th><th>Kunci</th><th>Status</th><th>Nama</th><th>ID</th></tr>
+                    </thead>
+                    <tbody id="log-table-body"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="actionModal" tabindex="-1" data-bs-backdrop="static">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content border-0 shadow">
+                <div class="modal-header bg-light">
+                    <h5 class="modal-title fw-bold" id="modalTitle">Tindakan</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body p-4">
+                    <form id="actionForm" onsubmit="event.preventDefault(); processAction();">
+                        <input type="hidden" id="selectedKeyId">
+                        <!-- Display Key Number -->
+                        <h3 id="displayKeyNum" class="text-center fw-bold text-dark mb-3">Kunci X</h3>
+                        
+                        <div id="borrowInputs">
+                            <div class="mb-3">
+                                <label class="form-label fw-bold">Pilih Nama</label>
+                                <select class="form-select" id="staffSelector" onchange="checkStaffType()">
+                                    <option value="" disabled selected>-- Loading --</option>
+                                </select>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label fw-bold" id="lblAuth">Kata Laluan</label>
+                                <input type="password" class="form-control" id="authInput" placeholder="Masukkan kata laluan">
+                            </div>
+                            <!-- MESSAGE ERROR AUTH DITAMBAH DI SINI -->
+                            <div id="authError" class="alert alert-danger d-none p-2 mt-2"></div>
+                        </div>
+
+                        <div id="returnInfo" class="d-none text-center alert alert-warning">
+                            <strong>Pengesahan Pemulangan</strong><br>
+                            <span id="returnName" class="fw-bold"></span> (<span id="returnStaffId"></span>)
+                        </div>
+
+                        <div class="d-grid mt-3">
+                            <button type="submit" class="btn btn-primary" id="btnSubmit">Sahkan</button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="changePasswordModal" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title">Tukar Kata Laluan</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form onsubmit="event.preventDefault(); processChangePassword();">
+                        <div class="mb-3">
+                            <label>ID Anda</label>
+                            <select class="form-select" id="cp_staffSelector" required></select>
+                        </div>
+                        <div class="mb-3">
+                            <label>Kata Laluan Lama</label>
+                            <input type="password" class="form-control" id="cp_oldPass" required>
+                        </div>
+                        <div class="mb-3">
+                            <label>Kata Laluan Baru</label>
+                            <input type="password" class="form-control" id="cp_newPass" required minlength="4">
+                        </div>
+                        <button type="submit" class="btn btn-primary w-100">Simpan</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // ==========================================
+        // KONFIGURASI PENTING
+        // ==========================================
+        // Sila GANTIKAN URL di bawah dengan URL /exec Google Apps Script anda!
+        const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbx-kuUcgiW4-YceKf34X176ntDv07WaFrckNge0zzZHkLRJbfHXfqYFacfC70ZfmiwQ/exec"; 
+
+        // Variables
+        let keysData = [];
+        let staffData = [];
+        let logsData = [];
+        let currentMode = '';
+
+        // Init
+        window.onload = function() {
+            if(APPS_SCRIPT_URL.includes("MASUKKAN_URL") || APPS_SCRIPT_URL.length < 10) {
+                showError("Sila masukkan URL Google Apps Script anda di dalam kod HTML.");
+                document.getElementById('loadingOverlay').style.display = 'none';
+                return;
+            }
+            fetchData();
+        };
+
+        // --- KOMUNIKASI GOOGLE SHEETS (VERSI ASAL) ---
+        
+        async function fetchData() {
+            showLoading(true);
+            document.getElementById('no-result-msg').classList.add('d-none');
+            
+            try {
+                const targetUrl = `${APPS_SCRIPT_URL}?action=get_data&t=${new Date().getTime()}`;
+                
+                const response = await fetch(targetUrl, {
+                    method: "GET",
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Ralat Server (${response.status}). Sila semak URL Script.`);
+                }
+
+                const data = await response.json();
+
+                if (data.error) throw new Error(data.error);
+
+                keysData = data.keys || [];
+                staffData = data.staff || [];
+                logsData = data.logs || [];
+
+                /*
+                 * Nota: Dalam versi asal, data kunci dihantar sebagai:
+                 * keys: [{ id: 1, status: 'available', borrower: '', staffId: '' }, ...]
+                 * Tiada lajur 'location'.
+                 * Log data dihantar sebagai:
+                 * logs: [{ time: '...', keyId: '...', type: '...', name: '...', staffId: '...' }, ...]
+                 */
+                
+                // Tambah data Lokasi secara tiruan (simulasi data lokasi dari Google Sheet)
+                // Ini diperlukan kerana Apps Script lama hanya menyokong 4 lajur data kunci.
+                const FAKE_LOCATIONS = [
+                    "Bilik Server", "Makmal Komputer A", "Bilik Pensyarah 1", "Bilik Mesyuarat Utama", 
+                    "Stor Peralatan", "Makmal Jurutera B", "Pejabat Utama", "Bilik Rekreasi",
+                    "Koperasi Pelajar", "Bilik Kuliah C", "Bilik Kuliah A", "Bilik Kuliah B",
+                    "Stor Kanan", "Bilik Peperiksaan", "Bilik Fail JKM", "Makmal Bahasa",
+                    "Bilik Pensyarah 2", "Studio Multimedia", "Gudang Belakang", "Surau",
+                    "Bilik Kaunseling", "Bilik Rawatan", "Makmal Robotik", "Bilik Seminar Kecil",
+                    "Bilik Kawalan", "Bilik Cetak", "Makmal Fizik", "Makmal Kimia",
+                    "Bilik Persalinan", "Pantry JKM"
+                ];
+
+                keysData.forEach((key, index) => {
+                    key.location = FAKE_LOCATIONS[index % FAKE_LOCATIONS.length] || `Kunci ${key.id}`;
+                });
+                // Log tidak mengandungi lokasi, jadi ia akan dipaparkan sebagai N/A
+                logsData.forEach(log => {
+                    log.location = ''; // Pastikan tiada data lokasi dalam log
+                });
+                
+                // End of temporary location assignment
+
+                if (keysData.length === 0) {
+                    showError("Berjaya sambung, tetapi tiada data kunci. Sila jalankan fungsi 'setupSheets' di Apps Script.");
+                } else {
+                    renderGrid(keysData);
+                    populateDropdowns();
+                    renderLogs(); 
+                    updateStats();
+                }
+
+            } catch (error) {
+                console.error("FETCH ERROR:", error);
+                let msg = "Gagal menghubungi database.";
+                
+                if (error.message.includes("Failed to fetch")) {
+                    msg = "Ralat Sambungan: Pastikan 'Who has access' diset kepada 'Anyone' semasa Deploy.";
+                } else if (error.message.includes("Unexpected token")) {
+                    msg = "Ralat URL: Anda mungkin menggunakan URL yang salah (bukan /exec).";
+                }
+                
+                showError(msg + " (" + error.message + ")");
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        async function sendData(payload) {
+            showLoading(true);
+            try {
+                const response = await fetch(APPS_SCRIPT_URL, {
+                    method: 'POST',
+                    body: JSON.stringify(payload)
+                });
+                
+                const result = await response.json();
+                return result;
+            } catch (error) {
+                console.error("SEND ERROR:", error);
+                // Menggantikan alert() dengan console.error
+                console.error("Ralat menghantar data:", error.message);
+                return { status: "error", message: error.message };
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        function showError(msg) {
+            const errDiv = document.getElementById('no-result-msg');
+            const errText = document.getElementById('error-details');
+            errDiv.classList.remove('d-none');
+            document.querySelector('#no-result-msg h5').innerText = "Ralat Sistem";
+            errText.innerText = msg;
+            errText.style.color = "red";
+            document.getElementById('key-grid').innerHTML = '';
+        }
+
+        // --- ACTION LOGIC ---
+
+        const modalElement = new bootstrap.Modal(document.getElementById('actionModal'));
+
+        function openModal(keyId) {
+            const key = keysData.find(k => k.id == keyId);
+            if (!key) return;
+
+            document.getElementById('selectedKeyId').value = keyId;
+            
+            // Mengemas kini modal title untuk menunjukkan No Kunci
+            document.getElementById('displayKeyNum').innerHTML = `${key.location || `KUNCI ${keyId}`}<br><small class="text-muted">(K${keyId})</small>`;
+            
+            document.getElementById('staffSelector').value = "";
+            document.getElementById('authInput').value = "";
+            document.getElementById('authError').classList.add('d-none'); // Clear error message when opening
+
+            const borrowInputs = document.getElementById('borrowInputs');
+            const returnInfo = document.getElementById('returnInfo');
+            const btnSubmit = document.getElementById('btnSubmit');
+
+            if (key.status === 'available') {
+                currentMode = 'borrow';
+                document.getElementById('modalTitle').innerText = `Pinjam Kunci: K${keyId}`;
+                borrowInputs.classList.remove('d-none');
+                returnInfo.classList.add('d-none');
+                btnSubmit.className = "btn btn-success w-100";
+                btnSubmit.innerText = "Simpan & Ambil";
+            } else {
+                currentMode = 'return';
+                document.getElementById('modalTitle').innerText = `Pulang Kunci: K${keyId}`;
+                borrowInputs.classList.add('d-none');
+                returnInfo.classList.remove('d-none');
+                document.getElementById('returnName').innerText = key.borrower;
+                document.getElementById('returnStaffId').innerText = key.staffId;
+                btnSubmit.className = "btn btn-warning w-100";
+                btnSubmit.innerText = "Sahkan Pemulangan";
+            }
+            modalElement.show();
+        }
+
+        async function processAction() {
+            const keyId = document.getElementById('selectedKeyId').value;
+            const now = new Date().toLocaleString('en-MY');
+            
+            let payload = {
+                action: "update_key",
+                keyId: keyId,
+                time: now
+            };
+
+            if (currentMode === 'borrow') {
+                const select = document.getElementById('staffSelector');
+                const selectedOption = select.options[select.selectedIndex];
+                const enteredAuth = document.getElementById('authInput').value;
+                const authErrorDiv = document.getElementById('authError');
+                authErrorDiv.classList.add('d-none'); // Clear previous errors
+
+                if (!selectedOption.value) { 
+                    authErrorDiv.innerText = "Sila pilih nama peminjam.";
+                    authErrorDiv.classList.remove('d-none');
+                    return; 
+                }
+                
+                const staffId = selectedOption.getAttribute('data-id');
+                const staffPass = selectedOption.getAttribute('data-pass');
+
+                if (staffId !== 'GUEST' && enteredAuth !== staffPass) {
+                    console.warn(`Attempted borrow fail for Key ${keyId}: Wrong password entered by ${selectedOption.value}.`);
+                    
+                    // MENGGANTIKAN alert() dengan mesej dalam modal
+                    authErrorDiv.innerText = "Kata laluan salah! Sila cuba lagi.";
+                    authErrorDiv.classList.remove('d-none');
+                    return;
+                }
+
+                payload.status = 'borrowed';
+                payload.borrower = selectedOption.value;
+                // Location tidak dihantar dalam versi asal
+                payload.staffId = staffId === 'GUEST' ? enteredAuth : staffId; 
+                payload.type = "KELUAR";
+
+            } else {
+                payload.status = 'available';
+                payload.borrower = "";
+                payload.staffId = "";
+                payload.type = "MASUK";
+                
+                const key = keysData.find(k => k.id == keyId);
+                payload.borrower = key.borrower;
+                payload.staffId = key.staffId;
+                // Location tidak dihantar dalam versi asal
+            }
+
+            modalElement.hide();
+            
+            const res = await sendData(payload);
+            if (res.status === "success") {
+                fetchData(); 
+            } else {
+                // Menggantikan alert() untuk ralat kemaskini
+                console.error("Gagal mengemaskini:", res.message || "Ralat tidak diketahui");
+            }
+        }
+
+        async function processChangePassword() {
+            const staffId = document.getElementById('cp_staffSelector').value;
+            const oldPass = document.getElementById('cp_oldPass').value;
+            const newPass = document.getElementById('cp_newPass').value;
+
+            if (!staffId) return;
+
+            const modal = bootstrap.Modal.getInstance(document.getElementById('changePasswordModal'));
+            modal.hide();
+
+            const res = await sendData({
+                action: "change_password",
+                staffId: staffId,
+                oldPass: oldPass,
+                newPass: newPass
+            });
+
+            if (res.status === "success") {
+                // Menggantikan alert() untuk kejayaan
+                console.log("Kata laluan berjaya ditukar!");
+                fetchData();
+            } else {
+                // Menggantikan alert() untuk kegagalan
+                console.error("Gagal menukar kata laluan:", res.message);
+            }
+        }
+
+        // --- UI HELPERS ---
+
+        function renderGrid(data) {
+            const container = document.getElementById('key-grid');
+            container.innerHTML = '';
+            
+            if (!data || data.length === 0) return;
+
+            data.forEach(k => {
+                const isAvail = k.status === 'available';
+                const col = document.createElement('div');
+                col.className = 'col-6 col-md-4 col-lg-2';
+                col.innerHTML = `
+                    <div class="key-box ${isAvail ? 'key-available' : 'key-borrowed'}" onclick="openModal('${k.id}')">
+                        <i class="fas fa-key mb-1 fa-lg d-none d-sm-block"></i>
+                        <span class="key-title text-dark">KUNCI ${k.id}</span>
+                        <small class="key-subtitle text-muted mb-2">${k.location || 'N/A'}</small>
+                        ${!isAvail ? `<small class="text-truncate px-1" style="font-size:10px; color:#dc3545;">${k.borrower}</small>` : '<span class="badge bg-success bg-opacity-75">ADA</span>'}
+                    </div>
+                `;
+                container.appendChild(col);
+            });
+        }
+
+        function populateDropdowns() {
+            const borrowSelect = document.getElementById('staffSelector');
+            const cpSelect = document.getElementById('cp_staffSelector');
+            
+            borrowSelect.innerHTML = '<option value="" disabled selected>-- Sila Pilih Nama --</option>';
+            cpSelect.innerHTML = '<option value="" disabled selected>-- Pilih Nama Anda --</option>';
+
+            staffData.sort((a,b) => a.name.localeCompare(b.name)).forEach(s => {
+                let opt = document.createElement('option');
+                opt.value = s.name;
+                opt.setAttribute('data-id', s.id);
+                opt.setAttribute('data-pass', s.password);
+                opt.text = s.name;
+                borrowSelect.appendChild(opt);
+
+                if (s.id !== 'GUEST') {
+                    let opt2 = document.createElement('option');
+                    opt2.value = s.id;
+                    opt2.text = s.name;
+                    cpSelect.appendChild(opt2);
+                }
+            });
+        }
+
+        /**
+         * Render the transaction logs, with an optional filter for Key ID.
+         * @param {string} filterTerm - The Key ID (or part of it) to filter by.
+         */
+        function renderLogs(filterTerm = '') {
+            const tbody = document.getElementById('log-table-body');
+            tbody.innerHTML = '';
+            
+            const term = filterTerm.toLowerCase().trim();
+
+            const filteredLogs = logsData.filter(l => {
+                if (!term) return true;
+                return l.keyId.toString().toLowerCase().includes(term);
+            });
+
+            if (filteredLogs.length === 0) {
+                const message = term 
+                    ? `Tiada rekod log ditemui untuk Kunci ${term}.`
+                    : `Tiada rekod log transaksi untuk dipaparkan.`;
+                // Colspan kembali ke 5
+                tbody.innerHTML = `<tr><td colspan="5" class="text-center text-muted py-3">${message}</td></tr>`;
+                return;
+            }
+
+            filteredLogs.forEach(l => {
+                const badge = l.type === 'KELUAR' ? 'bg-danger' : 'bg-success';
+                tbody.innerHTML += `
+                    <tr>
+                        <td>${l.time}</td>
+                        <td>K${l.keyId}</td>
+                        <td><span class="badge ${badge}">${l.type}</span></td>
+                        <td>${l.name}</td>
+                        <td>${l.staffId}</td>
+                    </tr>
+                `;
+            });
+        }
+
+        function filterLogs() {
+            const term = document.getElementById('logSearchInput').value.trim();
+            renderLogs(term);
+        }
+
+        function updateStats() {
+            const borrowed = keysData.filter(k => k.status === 'borrowed').length;
+            document.getElementById('count-borrowed').innerText = borrowed;
+            document.getElementById('count-available').innerText = keysData.length - borrowed;
+        }
+
+        function checkStaffType() {
+            const select = document.getElementById('staffSelector');
+            const option = select.options[select.selectedIndex];
+            const isGuest = option.getAttribute('data-id') === 'GUEST';
+            const input = document.getElementById('authInput');
+            const lbl = document.getElementById('lblAuth');
+
+            if (isGuest) {
+                lbl.innerText = "No. Telefon / IC";
+                input.type = "text";
+                input.placeholder = "Info Pelawat";
+            } else {
+                lbl.innerText = "Kata Laluan";
+                input.type = "password";
+                input.placeholder = "****";
+            }
+        }
+
+        function filterKeys() {
+            const term = document.getElementById('searchInput').value.toLowerCase();
+            const filtered = keysData.filter(k => 
+                k.id.toString().includes(term) || 
+                k.borrower.toLowerCase().includes(term)
+            );
+            renderGrid(filtered);
+        }
+
+        function openChangePasswordModal() {
+            new bootstrap.Modal(document.getElementById('changePasswordModal')).show();
+        }
+
+        function showLoading(show) {
+            document.getElementById('loadingOverlay').style.display = show ? 'flex' : 'none';
+        }
+
+        function exportToExcel() {
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(keysData), "Status");
+            XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(logsData), "Log");
+            XLSX.writeFile(wb, "Rekod_Kunci_JKM.xlsx");
+        }
+    </script>
+</body>
+</html>
