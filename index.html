@@ -221,6 +221,59 @@
             fetchData();
         };
 
+        // --- HELPER: FORMAT MASA DAN TARIKH (DD-MM-YYYY, HH:MM:SS AM/PM) ---
+        function formatDateTime() {
+            const d = new Date();
+
+            // Komponen Tarikh (DD-MM-YYYY)
+            const day = String(d.getDate()).padStart(2, '0');
+            const month = String(d.getMonth() + 1).padStart(2, '0'); // Bulan adalah 0-indeks
+            const year = d.getFullYear();
+
+            // Komponen Masa (HH:MM:SS AM/PM)
+            const timeOptions = { 
+                hour: '2-digit', 
+                minute: '2-digit', 
+                second: '2-digit', 
+                hour12: true // Memastikan format AM/PM
+            };
+            // Gunakan 'en-US' locale untuk memastikan format AM/PM berfungsi secara konsisten
+            const timePart = d.toLocaleTimeString('en-US', timeOptions);
+
+            // Gabungkan
+            return `${day}-${month}-${year}, ${timePart}`;
+        }
+
+        // --- HELPER: STANDARDISASI MASA LOG LAMA UNTUK PAPARAN
+        function standardizeLogTime(timeString) {
+            // Semak jika rentetan sudah dalam format sasaran (DD-MM-YYYY, HH:MM:SS AM/PM)
+            if (timeString && /^\d{2}-\d{2}-\d{4}, \d{1,2}:\d{2}:\d{2} (AM|PM)/.test(timeString)) {
+                return timeString; // Sudah betul, pulangkan sahaja
+            }
+
+            // Jika tidak, cuba parse sebagai objek Date
+            const d = new Date(timeString);
+
+            // Semak jika objek tarikh sah
+            if (isNaN(d.getTime())) {
+                return timeString; // Gagal parse, pulangkan rentetan asal
+            }
+
+            // Jika berjaya parse, formatkannya
+            const day = String(d.getDate()).padStart(2, '0');
+            const month = String(d.getMonth() + 1).padStart(2, '0');
+            const year = d.getFullYear();
+            const timeOptions = { 
+                hour: '2-digit', 
+                minute: '2-digit', 
+                second: '2-digit', 
+                hour12: true
+            };
+            const timePart = d.toLocaleTimeString('en-US', timeOptions);
+
+            return `${day}-${month}-${year}, ${timePart}`;
+        }
+        
         // --- KOMUNIKASI GOOGLE SHEETS (VERSI ASAL) ---
         
         async function fetchData() {
@@ -375,7 +428,8 @@
 
         async function processAction() {
             const keyId = document.getElementById('selectedKeyId').value;
-            const now = new Date().toLocaleString('en-MY');
+            // MENGGUNAKAN FUNGSI BARU UNTUK FORMAT MASA DAN TARIKH
+            const now = formatDateTime(); 
             
             let payload = {
                 action: "update_key",
@@ -538,9 +592,12 @@
 
             filteredLogs.forEach(l => {
                 const badge = l.type === 'KELUAR' ? 'bg-danger' : 'bg-success';
+                // MENGGUNAKAN standardizedLogTime UNTUK MEMASTIKAN FORMAT MASA YANG KONSISTEN
+                const formattedTime = standardizeLogTime(l.time); 
+                
                 tbody.innerHTML += `
                     <tr>
-                        <td>${l.time}</td>
+                        <td>${formattedTime}</td>
                         <td>K${l.keyId}</td>
                         <td><span class="badge ${badge}">${l.type}</span></td>
                         <td>${l.name}</td>
